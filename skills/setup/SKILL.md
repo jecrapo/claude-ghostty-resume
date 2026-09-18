@@ -21,9 +21,6 @@ appends a block to `~/.zshrc` that resumes a session in each restored pane.
 Repeat the Ghostty setting the script prints: without `window-save-state =
 always` Ghostty opens one empty window and nothing resumes.
 
-Sessions running before the install have no record. Tell the user to run
-`claude-ghostty-resume import-live` once.
-
 ## Uninstall
 
 If the user asked to remove or disable it:

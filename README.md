@@ -35,12 +35,8 @@ unset _cgr_id
 # <<< claude-ghostty-resume <<<
 ```
 
-Sessions already running when you install have no record yet. Register them
-once with:
-
-```
-claude-ghostty-resume import-live
-```
+Sessions already running when you install have no record. They are recorded
+from their next start.
 
 ## Required settings
 
@@ -84,7 +80,6 @@ the records that are still waiting.
 ```
 claude-ghostty-resume list               # every record and why it would or wouldn't resume
 claude-ghostty-resume claim --dry-run    # what this pane would resume, or why not
-claude-ghostty-resume import-live        # register sessions running right now
 claude-ghostty-resume prune              # drop records that can never resume
 ```
 

@@ -15,8 +15,6 @@ Commands:
                        print the id of one session to resume in this pane;
                        exit 1 when there is none or this is not a restored pane
   list                 show registry records and why each would/wouldn't resume
-  import-live          seed the registry from currently running sessions, for
-                       sessions started before the hook was installed
   prune                delete records for sessions that will never resume
 """
 import glob
@@ -45,13 +43,6 @@ def load_json(path):
             return json.load(f)
     except (OSError, ValueError):
         return None
-
-
-def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-    os.replace(tmp, path)
 
 
 def pid_alive(pid):
@@ -255,32 +246,6 @@ def cmd_claim(argv):
     refuse("every session for %s is claimed by another pane" % cwd)
 
 
-def cmd_import_live():
-    os.makedirs(REGISTRY_DIR, exist_ok=True)
-    now = int(time.time())
-    for path in glob.glob(os.path.join(LIVE_DIR, "*.json")):
-        data = load_json(path) or {}
-        if data.get("kind") != "interactive" or not data.get("sessionId"):
-            continue
-        if not pid_alive(data.get("pid")):
-            continue
-        target = os.path.join(REGISTRY_DIR, data["sessionId"] + ".json")
-        rec = load_json(target) or {"started_at": now}
-        rec.update(
-            {
-                "session_id": data["sessionId"],
-                "cwd": data.get("cwd"),
-                "title": data.get("name") if data.get("nameSource") == "user" else rec.get("title"),
-                "entrypoint": data.get("entrypoint", "cli"),
-                "updated_at": now,
-                "ended_at": None,
-                "end_reason": None,
-            }
-        )
-        write_json(target, rec)
-        print("imported %s  %s  %s" % (data["sessionId"][:8], data.get("name"), data.get("cwd")))
-
-
 def cmd_prune():
     live = live_session_ids()
     for rec in records():
@@ -303,8 +268,6 @@ def main(argv):
         cmd_claim(argv[1:])
     elif cmd == "list":
         cmd_list()
-    elif cmd == "import-live":
-        cmd_import_live()
     elif cmd == "prune":
         cmd_prune()
     else:

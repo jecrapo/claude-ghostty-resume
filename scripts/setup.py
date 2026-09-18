@@ -64,8 +64,8 @@ def install():
     print(
         "\nGhostty must restore its windows for panes to come back:\n"
         "  window-save-state = always   in your Ghostty config\n"
-        "\nSessions running right now have no record yet; register them with\n"
-        "  claude-ghostty-resume import-live"
+        "\nSessions already running are not recorded; start them again or"
+        " accept that they will not come back the first time."
     )
 
 
