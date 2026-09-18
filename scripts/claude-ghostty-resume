@@ -11,9 +11,9 @@ Records come from ~/.claude/ghostty-resume, maintained by the
 session-registry.py hooks.
 
 Commands:
-  claim [--dry-run] [--cwd DIR] [--window SECONDS]
-                       print the id of one session to resume in this pane;
-                       exit 1 when there is none or this is not a restored pane
+  claim                print the id of one session to resume in this pane;
+                       exit 1, with the reason on stderr, when there is none
+                       or this is not a restored pane
   list                 show registry records and why each would/wouldn't resume
   prune                delete records for sessions that will never resume
 """
@@ -24,14 +24,12 @@ import subprocess
 import sys
 import time
 
-REGISTRY_DIR = os.environ.get(
-    "CLAUDE_GHOSTTY_RESUME_DIR", os.path.expanduser("~/.claude/ghostty-resume")
-)
+REGISTRY_DIR = os.path.expanduser("~/.claude/ghostty-resume")
 LIVE_DIR = os.path.expanduser("~/.claude/sessions")
 MAX_AGE_DAYS = 30
 # A restored shell starts within moments of Ghostty itself; a shell whose
 # Ghostty is older than this is an ordinary new tab.
-RESTORE_WINDOW_SECONDS = int(os.environ.get("CLAUDE_GHOSTTY_RESUME_WINDOW", "60"))
+RESTORE_WINDOW_SECONDS = 60
 # A claimed record that never got resumed (claude failed to start, the user
 # hit ctrl-c) becomes claimable again after this long.
 CLAIM_TTL_SECONDS = 600
@@ -207,24 +205,16 @@ def try_claim(rec):
     return True
 
 
-def cmd_claim(argv):
-    dry_run = "--dry-run" in argv
+def cmd_claim():
     cwd = os.getcwd()
-    window = RESTORE_WINDOW_SECONDS
-    if "--cwd" in argv:
-        cwd = argv[argv.index("--cwd") + 1]
-    if "--window" in argv:
-        window = int(argv[argv.index("--window") + 1])
 
     def refuse(msg):
-        if dry_run:
-            print("no resume: " + msg)
-        sys.exit(1)
+        sys.exit("no resume: " + msg)
 
     age = ghostty_age_seconds(os.getppid())
     if age is None:
         refuse("no Ghostty ancestor process")
-    if age > window:
+    if age > RESTORE_WINDOW_SECONDS:
         refuse("Ghostty has been running %d s, this is not a restored pane" % age)
 
     live = live_session_ids()
@@ -237,9 +227,6 @@ def cmd_claim(argv):
             refuse("every session for %s is claimed by another pane" % cwd)
         refuse("no resumable session recorded for %s" % cwd)
     for rec in candidates:
-        if dry_run:
-            print("would resume %s  %s" % (rec["session_id"], display_title(rec)))
-            sys.exit(0)
         if try_claim(rec):
             print(rec["session_id"])
             sys.exit(0)
@@ -265,7 +252,7 @@ def cmd_prune():
 def main(argv):
     cmd = argv[0] if argv else "claim"
     if cmd == "claim":
-        cmd_claim(argv[1:])
+        cmd_claim()
     elif cmd == "list":
         cmd_list()
     elif cmd == "prune":

@@ -15,9 +15,7 @@ import os
 import sys
 import time
 
-REGISTRY_DIR = os.environ.get(
-    "CLAUDE_GHOSTTY_RESUME_DIR", os.path.expanduser("~/.claude/ghostty-resume")
-)
+REGISTRY_DIR = os.path.expanduser("~/.claude/ghostty-resume")
 COMMAND_LINK = os.path.expanduser("~/.local/bin/claude-ghostty-resume")
 PLUGIN_CACHE = os.path.expanduser("~/.claude/plugins/")
 DELIBERATE_END_REASONS = {"clear", "logout", "prompt_input_exit", "resume"}

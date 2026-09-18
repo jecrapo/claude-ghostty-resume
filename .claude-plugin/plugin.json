@@ -1,7 +1,7 @@
 {
   "name": "ghostty-resume",
   "displayName": "Ghostty Resume",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bring Claude Code sessions back when Ghostty restores its windows, each in the pane whose directory it ran in.",
   "author": {
     "name": "John Porsback",

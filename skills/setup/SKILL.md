@@ -36,8 +36,7 @@ uninstalled with `/plugin`.
 
 - `claude-ghostty-resume list` shows every recorded session and why it would
   or would not be resumed.
-- `claude-ghostty-resume claim --dry-run` run in a pane says what that pane
-  would resume, or why it would not. Add `--window 999999` to ignore the check
-  that Ghostty just started.
+- `claude-ghostty-resume claim` run by hand in a pane prints why it declines,
+  such as Ghostty having been open too long for the pane to count as restored.
 - Only zsh is supported. The block lives at the end of `~/.zshrc` and must
   stay after anything that sets `PATH`.

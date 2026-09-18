@@ -79,15 +79,9 @@ the records that are still waiting.
 
 ```
 claude-ghostty-resume list               # every record and why it would or wouldn't resume
-claude-ghostty-resume claim --dry-run    # what this pane would resume, or why not
+claude-ghostty-resume claim              # what the .zshrc block runs; says why when it declines
 claude-ghostty-resume prune              # drop records that can never resume
 ```
-
-`claim --dry-run --window 999999` ignores the check that Ghostty just
-started, for testing in a pane that has been open a while.
-
-Environment variables: `CLAUDE_GHOSTTY_RESUME_DIR` moves the registry, and
-`CLAUDE_GHOSTTY_RESUME_WINDOW` changes the 60 second restore window.
 
 ## Uninstall
 
