@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""Resume the Claude Code session that ran in this Ghostty pane before Ghostty quit.
+
+Ghostty restores every window, tab and split at its old working directory
+when it starts (window-save-state = always). It does not restore the processes
+that ran in them. `claim` runs from .zshrc in each restored shell, finds a
+recorded session for the shell's directory, and prints its id for the shell to
+pass to `claude --resume`.
+
+Records come from ~/.claude/ghostty-resume, maintained by the
+session-registry.py hooks.
+
+Commands:
+  claim [--dry-run] [--cwd DIR] [--window SECONDS]
+                       print the id of one session to resume in this pane;
+                       exit 1 when there is none or this is not a restored pane
+  list                 show registry records and why each would/wouldn't resume
+  import-live          seed the registry from currently running sessions, for
+                       sessions started before the hook was installed
+  prune                delete records for sessions that will never resume
+"""
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+REGISTRY_DIR = os.environ.get(
+    "CLAUDE_GHOSTTY_RESUME_DIR", os.path.expanduser("~/.claude/ghostty-resume")
+)
+LIVE_DIR = os.path.expanduser("~/.claude/sessions")
+MAX_AGE_DAYS = 30
+# A restored shell starts within moments of Ghostty itself; a shell whose
+# Ghostty is older than this is an ordinary new tab.
+RESTORE_WINDOW_SECONDS = int(os.environ.get("CLAUDE_GHOSTTY_RESUME_WINDOW", "60"))
+# A claimed record that never got resumed (claude failed to start, the user
+# hit ctrl-c) becomes claimable again after this long.
+CLAIM_TTL_SECONDS = 600
+
+
+def load_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def write_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, ValueError, OverflowError):
+        return True
+    return True
+
+
+def live_session_ids():
+    """Claude Code leaves ~/.claude/sessions files behind when it is killed,
+    so a file only counts when its pid is still running."""
+    ids = set()
+    for path in glob.glob(os.path.join(LIVE_DIR, "*.json")):
+        data = load_json(path) or {}
+        if data.get("sessionId") and pid_alive(data.get("pid")):
+            ids.add(data["sessionId"])
+    return ids
+
+
+def title_from_transcript(transcript_path):
+    """The name set via /rename is only persisted as custom-title lines in the
+    transcript; the last one wins."""
+    title = None
+    try:
+        with open(transcript_path, "rb") as f:
+            for line in f:
+                if b'"custom-title"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if entry.get("type") == "custom-title":
+                    title = entry.get("customTitle") or title
+    except OSError:
+        pass
+    return title
+
+
+def record_files():
+    return sorted(glob.glob(os.path.join(REGISTRY_DIR, "*.json")))
+
+
+def records():
+    out = []
+    for path in record_files():
+        data = load_json(path)
+        if data and data.get("session_id"):
+            data["_path"] = path
+            out.append(data)
+    return out
+
+
+def claim_marker(rec):
+    return os.path.join(REGISTRY_DIR, rec["session_id"] + ".claim")
+
+
+def claim_age(rec):
+    try:
+        return time.time() - os.path.getmtime(claim_marker(rec))
+    except OSError:
+        return None
+
+
+def skip_reason(rec, live):
+    if rec.get("entrypoint") not in (None, "cli"):
+        return "not an interactive terminal session"
+    if rec["session_id"] in live:
+        return "already running"
+    if rec.get("end_reason") and rec["end_reason"] != "other":
+        return "ended deliberately (%s)" % rec["end_reason"]
+    transcript = rec.get("transcript_path")
+    if transcript and not os.path.exists(transcript):
+        return "transcript gone"
+    if rec.get("cwd") and not os.path.isdir(rec["cwd"]):
+        return "directory gone: %s" % rec["cwd"]
+    age_days = (time.time() - rec.get("updated_at", 0)) / 86400
+    if age_days > MAX_AGE_DAYS:
+        return "last seen %d days ago" % age_days
+    claimed = claim_age(rec)
+    if claimed is not None and claimed < CLAIM_TTL_SECONDS:
+        return "claimed by a pane %d s ago" % claimed
+    return None
+
+
+def display_title(rec):
+    return (
+        title_from_transcript(rec.get("transcript_path") or "")
+        or rec.get("title")
+        or rec["session_id"][:8]
+    )
+
+
+def parse_etime(text):
+    """ps etime is [[dd-]hh:]mm:ss."""
+    days = 0
+    if "-" in text:
+        d, text = text.split("-", 1)
+        days = int(d)
+    parts = [int(p) for p in text.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    h, m, s = parts
+    return days * 86400 + h * 3600 + m * 60 + s
+
+
+def ghostty_age_seconds(start_pid):
+    """Walk up from start_pid to the Ghostty process and return how long it has
+    been running, or None when no ancestor is Ghostty (tmux, ssh, another
+    terminal)."""
+    pid = start_pid
+    for _ in range(16):
+        if pid <= 1:
+            return None
+        out = subprocess.run(
+            ["ps", "-o", "ppid=,etime=,comm=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+        ).stdout.split(None, 2)
+        if len(out) < 3:
+            return None
+        ppid, etime, comm = out
+        if comm.strip().endswith("/MacOS/ghostty"):
+            return parse_etime(etime.strip())
+        pid = int(ppid)
+    return None
+
+
+def cmd_list():
+    live = live_session_ids()
+    for rec in records():
+        reason = skip_reason(rec, live)
+        status = "SKIP  " + reason if reason else "RESUME"
+        print("%s  %-30s %s  %s" % (rec["session_id"][:8], display_title(rec)[:30], status, rec.get("cwd", "")))
+
+
+def same_dir(a, b):
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except (OSError, TypeError):
+        return False
+
+
+def try_claim(rec):
+    """Exclusive create of the marker is the mutex between panes restored in
+    the same directory."""
+    try:
+        fd = os.open(claim_marker(rec), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        age = claim_age(rec)
+        if age is None or age < CLAIM_TTL_SECONDS:
+            return False
+        os.utime(claim_marker(rec), None)
+        return True
+    os.close(fd)
+    return True
+
+
+def cmd_claim(argv):
+    dry_run = "--dry-run" in argv
+    cwd = os.getcwd()
+    window = RESTORE_WINDOW_SECONDS
+    if "--cwd" in argv:
+        cwd = argv[argv.index("--cwd") + 1]
+    if "--window" in argv:
+        window = int(argv[argv.index("--window") + 1])
+
+    def refuse(msg):
+        if dry_run:
+            print("no resume: " + msg)
+        sys.exit(1)
+
+    age = ghostty_age_seconds(os.getppid())
+    if age is None:
+        refuse("no Ghostty ancestor process")
+    if age > window:
+        refuse("Ghostty has been running %d s, this is not a restored pane" % age)
+
+    live = live_session_ids()
+    here = [rec for rec in records() if same_dir(rec.get("cwd"), cwd)]
+    reasons = {rec["session_id"]: skip_reason(rec, live) for rec in here}
+    candidates = [rec for rec in here if not reasons[rec["session_id"]]]
+    candidates.sort(key=lambda r: r.get("started_at", 0))
+    if not candidates:
+        if any(r and r.startswith("claimed") for r in reasons.values()):
+            refuse("every session for %s is claimed by another pane" % cwd)
+        refuse("no resumable session recorded for %s" % cwd)
+    for rec in candidates:
+        if dry_run:
+            print("would resume %s  %s" % (rec["session_id"], display_title(rec)))
+            sys.exit(0)
+        if try_claim(rec):
+            print(rec["session_id"])
+            sys.exit(0)
+    refuse("every session for %s is claimed by another pane" % cwd)
+
+
+def cmd_import_live():
+    os.makedirs(REGISTRY_DIR, exist_ok=True)
+    now = int(time.time())
+    for path in glob.glob(os.path.join(LIVE_DIR, "*.json")):
+        data = load_json(path) or {}
+        if data.get("kind") != "interactive" or not data.get("sessionId"):
+            continue
+        if not pid_alive(data.get("pid")):
+            continue
+        target = os.path.join(REGISTRY_DIR, data["sessionId"] + ".json")
+        rec = load_json(target) or {"started_at": now}
+        rec.update(
+            {
+                "session_id": data["sessionId"],
+                "cwd": data.get("cwd"),
+                "title": data.get("name") if data.get("nameSource") == "user" else rec.get("title"),
+                "entrypoint": data.get("entrypoint", "cli"),
+                "updated_at": now,
+                "ended_at": None,
+                "end_reason": None,
+            }
+        )
+        write_json(target, rec)
+        print("imported %s  %s  %s" % (data["sessionId"][:8], data.get("name"), data.get("cwd")))
+
+
+def cmd_prune():
+    live = live_session_ids()
+    for rec in records():
+        reason = skip_reason(rec, live)
+        if reason and reason != "already running" and not reason.startswith("claimed"):
+            os.remove(rec["_path"])
+            try:
+                os.remove(claim_marker(rec))
+            except OSError:
+                pass
+            print("pruned %s  %s" % (rec["session_id"][:8], reason))
+    for marker in glob.glob(os.path.join(REGISTRY_DIR, "*.claim")):
+        if not os.path.exists(marker[: -len(".claim")] + ".json"):
+            os.remove(marker)
+
+
+def main(argv):
+    cmd = argv[0] if argv else "claim"
+    if cmd == "claim":
+        cmd_claim(argv[1:])
+    elif cmd == "list":
+        cmd_list()
+    elif cmd == "import-live":
+        cmd_import_live()
+    elif cmd == "prune":
+        cmd_prune()
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

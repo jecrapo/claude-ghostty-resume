@@ -1,0 +1,18 @@
+{
+  "name": "claude-ghostty-resume",
+  "owner": {
+    "name": "John Porsback",
+    "url": "https://github.com/jecrapo"
+  },
+  "metadata": {
+    "description": "Resume Claude Code sessions when Ghostty restores its windows"
+  },
+  "plugins": [
+    {
+      "name": "ghostty-resume",
+      "description": "Bring Claude Code sessions back when Ghostty restores its windows, each in the pane whose directory it ran in.",
+      "source": "./",
+      "version": "0.1.0"
+    }
+  ]
+}

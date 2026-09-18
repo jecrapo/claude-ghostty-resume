@@ -1,0 +1,14 @@
+{
+  "name": "ghostty-resume",
+  "displayName": "Ghostty Resume",
+  "version": "0.1.0",
+  "description": "Bring Claude Code sessions back when Ghostty restores its windows, each in the pane whose directory it ran in.",
+  "author": {
+    "name": "John Porsback",
+    "url": "https://github.com/jecrapo"
+  },
+  "homepage": "https://github.com/jecrapo/claude-ghostty-resume",
+  "repository": "https://github.com/jecrapo/claude-ghostty-resume",
+  "license": "MIT",
+  "keywords": ["ghostty", "sessions", "resume", "macos", "zsh"]
+}
